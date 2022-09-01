@@ -1,0 +1,266 @@
+AWSTemplateFormatVersion: 2010-09-09
+Parameters:
+  InstanceTypeParameter:
+    Type: String
+    Default: t2.micro
+    Description: Enter instance size. Default is t3a.medium.
+  WorkstationIp:
+    Type: String
+    Default: 10.0.0.0
+    Description: The IP address of the workstation that can SSH into the instan
+  AMI:
+    Type: String
+    Default: ??
+    Description: The Linux AMI to use.
+  Key:
+    Type: String
+    Default: mytest
+    Description: The key used to access the instance.
+Resources:
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/24
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: Linux VPC
+  #A NAT Gateway:
+  NATGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt ElasticIPAddress.AllocationId
+      SubnetId: !Ref SubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub NAT-${AWS::StackName}
+  ElasticIPAddress:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: VPC
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-southeast-2a
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.0.0/28
+      MapPublicIpOnLaunch: true
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-southeast-2a
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.0.32/27
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGateway
+    Properties:
+      DestinationC1drBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+  PrivateRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      RouteTableId: !Ref PrivateRouteTable
+      NatGatewayId: !Ref NATGateway
+  PublicSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref SubnetA
+  PrivateSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      SubnetId: !Ref SubnetB
+  InstanceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: "Private Instance SG Group"
+      GroupDescription: "Private instance sg group"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !Sub $(WorkstationIp}/32
+      SecurityGroupEgress:
+        - IpProtocol: -1
+          cidrIp: 0.0.0.0/0
+  BastionHostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: "Bastion Host SG Group"
+      GroupDescription: "Bastion host SG group"
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: !Sub $(WorkstationIp}/27
+        - IpProtocol: icmp
+          FromPort: '-1'
+          ToPort: '-1'
+          CidrIp: !Sub $(WorkstationIp}/27
+  Linux:
+    Type: AWS::EC2::Instance
+    Properties:
+      SubnetId: !Ref SubnetB
+      ImageId: !Ref AMI
+      InstanceType: !Ref InstanceTypeParameter #t2.micro
+      KeyName: !Ref Key
+      SecurityGroupIds:
+        - Ref: InstanceSecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 10
+      Tags:
+        -
+          Key: Application
+          Value: Linux Server
+        -
+          Key: Domain
+          Value: None
+        -
+          Key: Environment
+          Value: Test
+        -
+          Key: LifeTime
+          Value: Transient
+        -
+          Key: Name
+          Value: Linux Server
+        -
+          Key: OS
+          Value: Linux
+        -
+          Key: Purpose
+          Value: Test Instance
+      UserData:
+        Fn::Base64: |
+          !Sub |
+          #cloud-boothook
+          #!/bin/bash
+          echo "Hello World!"
+          yum -y --security update\n
+          yum update -y\n
+          sudo timedatectl set-timezone\n
+    Metadata:
+      AWS::CloudFormation::Authentication:
+        S3BucketAccessCredential:
+          type: "S3"
+          roleName: !Ref BastionHostRole
+      AWS::CloudFormation::Init:
+        Install:
+          packages:
+            yum:
+              httpd: [ ]
+        services:
+          sysvinit:
+            httpd:
+              enabled: 'true'
+              ensureRunning: 'true'
+        files:
+          /var/www/html/:
+            source: "S3://xx-source/test.file"
+          mode: "000600"
+          owner: root
+          group: root
+          authentication: "S3BucketAccessCredential"
+  BastionAutoScalingGroup:
+    Type: AWS::AutoScaling::AutoScalingGroup
+    Properties:
+      LaunchTemplate:
+        LaunchTemplateId: !Ref LaunchTemplate
+        Version: !GetAtt LaunchTemplate.LatestVersionNumber
+      VPCZoneIdentifier:
+        - !Ref SubnetA
+      MinSize: 1
+      MaxSize: 1
+      DesiredCapacity: 1
+  BastionHostProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref BastionHostRole
+  LaunchTemplate:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        InstanceType:
+          !Ref InstanceTypeParameter
+        ImageId:
+          !Ref AMI
+        SecurityGroupIds:
+          - !GetAtt "BastionHostSecurityGroup.GroupId"
+        IamInstanceProfile:
+          Arn: !GetAtt
+              - BastionHostProfile
+              - Arn
+        KeyName:
+          !Ref Key
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - Key: Name
+                Value: Bastion Host
+        UserData:
+          Fn::Base64:
+            Fn::Join:
+              - ''
+              - - "#!/bin/bash\n"
+                - "yum -y --security update\n"
+                - "yum update -y\n"
+                - "sudo timedatectl set-timezone"
+  BastionHostRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - !Sub ec2.${AWS::URLSuffix}
+            Effect: Allow
+        Version: 2012-10-17
+  BastionHostPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: BastionPolicy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - ec2:DescribeAddresses
+            Resource: '*'
+            Effect: Allow
+          - Effect: Allow
+            Action:
+              - ec2: AssociateAddress
+            Resource: '*'
+            Condition:
+              StringEquals:
+                ec2:ResourceTag/aws:cloudformation:stack-id:
+                  !Ref AWS::StackId
+      Roles:
+        - !Ref BastionHostRole

@@ -3,7 +3,7 @@ Parameters:
   InstanceTypeParameter:
     Type: String
     Default: t2.micro
-    Description: Enter instance size. Default is t2.micro.
+    Description: Enter instance size. Default is t3a.medium.
   WorkstationIp:
     Type: String
     Default: 10.0.0.0
@@ -201,11 +201,11 @@ Resources:
       MinSize: 1
       MaxSize: 1
       DesiredCapacity: 1
-  EC2InstsanceProfile:
+  EC2InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Roles:
-        - !Ref EC2InstranceRole
+        - !Ref EC2InstanceRole
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
@@ -231,7 +231,7 @@ Resources:
                 - "yum -y --security update\n"
                 - "yum update -y\n"
                 - "sudo timedatectl set-timezone"
-  EC2InstranceRole:
+  EC2InstanceRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:

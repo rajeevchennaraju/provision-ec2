@@ -3,7 +3,7 @@ Parameters:
   InstanceTypeParameter:
     Type: String
     Default: t2.micro
-    Description: Enter instance size. Default is t3a.medium.
+    Description: Enter instance size. Default is t2.micro.
   WorkstationIp:
     Type: String
     Default: 10.0.0.0

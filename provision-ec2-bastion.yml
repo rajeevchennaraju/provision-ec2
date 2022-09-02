@@ -126,6 +126,10 @@ Resources:
       SubnetId: !Ref SubnetB
       ImageId: !Ref AMI
       InstanceType: !Ref InstanceTypeParameter #t2.micro
+      IamInstanceProfile:
+        Arn: !GetAtt
+          - EC2InstanceProfile
+          - Arn
       KeyName: !Ref Key
       SecurityGroupIds:
         - Ref: InstanceSecurityGroup
@@ -168,7 +172,7 @@ Resources:
       AWS::CloudFormation::Authentication:
         S3BucketAccessCredential:
           type: "S3"
-          roleName: !Ref BastionHostRole
+          roleName: !Ref EC2InstanceRole
       AWS::CloudFormation::Init:
         Install:
           packages:
@@ -197,11 +201,11 @@ Resources:
       MinSize: 1
       MaxSize: 1
       DesiredCapacity: 1
-  BastionHostProfile:
+  EC2InstsanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Roles:
-        - !Ref BastionHostRole
+        - !Ref EC2InstranceRole
   LaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
@@ -212,10 +216,6 @@ Resources:
           !Ref AMI
         SecurityGroupIds:
           - !GetAtt "BastionHostSecurityGroup.GroupId"
-        IamInstanceProfile:
-          Arn: !GetAtt
-              - BastionHostProfile
-              - Arn
         KeyName:
           !Ref Key
         TagSpecifications:
@@ -231,7 +231,7 @@ Resources:
                 - "yum -y --security update\n"
                 - "yum update -y\n"
                 - "sudo timedatectl set-timezone"
-  BastionHostRole:
+  EC2InstranceRole:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
@@ -243,10 +243,10 @@ Resources:
                 - !Sub ec2.${AWS::URLSuffix}
             Effect: Allow
         Version: 2012-10-17
-  BastionHostPolicy:
+  EC2InstancePolicy:
     Type: AWS::IAM::Policy
     Properties:
-      PolicyName: BastionPolicy
+      PolicyName: EC2InstancePolicy
       PolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -256,11 +256,8 @@ Resources:
             Effect: Allow
           - Effect: Allow
             Action:
-              - ec2: AssociateAddress
+              - s3: Get*
+              - s3: List*
             Resource: '*'
-            Condition:
-              StringEquals:
-                ec2:ResourceTag/aws:cloudformation:stack-id:
-                  !Ref AWS::StackId
       Roles:
-        - !Ref BastionHostRole
+        - !Ref EC2InstanceRole
